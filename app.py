@@ -222,19 +222,37 @@ if df.empty or len(df) < 400:
                "osservazioni per una stima ciclica affidabile. Allarga il periodo o cambia ticker.")
     st.stop()
 
-price = get_price_series(df)
-split_pos, split_date = simple_is_oos_split(price, is_frac=2 / 3)
-dev_end_pos, holdout_date = locked_holdout_split(price, holdout_frac) if holdout_frac > 0 \
-    else (len(price), price.index[-1])
+price_full = get_price_series(df)
+n_full = len(price_full)
 
-# KPI
+# HOLDOUT REALE: la coda "congelata" viene TOLTA da tutta l'analisi (spettro, segnale,
+# validazione, walk-forward). 'price' = set di SVILUPPO (IS + OOS); tutto il resto lavora
+# su 'price'. Con Holdout = 0 il set di sviluppo coincide con l'intera serie e l'OOS si
+# allarga (piu' barre -> piu' trade).
+if holdout_frac > 0:
+    dev_end_pos, holdout_start_date = locked_holdout_split(price_full, holdout_frac)
+else:
+    dev_end_pos, holdout_start_date = n_full, None
+
+price = price_full.iloc[:dev_end_pos]           # set di sviluppo: qui gira tutta l'analisi
+holdout_price = price_full.iloc[dev_end_pos:]   # coda congelata, mai usata per lo scoring
+
+split_pos, split_date = simple_is_oos_split(price, is_frac=2 / 3)
+# Nel grafico del set di sviluppo la zona holdout e' vuota (l'holdout e' oltre 'price').
+chart_holdout_date = price.index[-1]
+
+# KPI (descrivono lo strumento e il set di sviluppo effettivamente analizzato)
 returns_all = pct_returns(price)
 c1, c2, c3, c4, c5 = st.columns(5)
-c1.metric("Prezzo", f"{price.iloc[-1]:,.2f}")
-c2.metric("Osservazioni", f"{len(price):,}")
-c3.metric("Periodo", f"{price.index[0].date()} → {price.index[-1].date()}")
+c1.metric("Prezzo (ultimo reale)", f"{price_full.iloc[-1]:,.2f}")
+c2.metric("Barre sviluppo", f"{len(price):,}")
+c3.metric("Periodo sviluppo", f"{price.index[0].date()} → {price.index[-1].date()}")
 c4.metric("Vol. annua", f"{returns_all.std() * np.sqrt(252) * 100:.1f}%")
-c5.metric("Rendim. buy&hold", f"{(price.iloc[-1] / price.iloc[0] - 1) * 100:+.0f}%")
+c5.metric("Buy&hold (sviluppo)", f"{(price.iloc[-1] / price.iloc[0] - 1) * 100:+.0f}%")
+if holdout_start_date is not None:
+    st.caption(f"🔒 {len(holdout_price)} barre in **holdout congelato** dal "
+               f"{holdout_start_date.date()} — escluse da spettro, segnale, validazione e "
+               f"walk-forward. Imposta **Holdout = 0** per includerle e allargare l'OOS.")
 st.divider()
 
 # ===================================================
@@ -280,7 +298,7 @@ st.header("2 · Il ciclo isolato e la sua deriva nel tempo")
 osc = cycle_oscillator(price, dom_period, bandwidth)
 
 st.plotly_chart(
-    charts.build_price_cycle_chart(price, osc, split_date, holdout_date, ticker),
+    charts.build_price_cycle_chart(price, osc, split_date, chart_holdout_date, ticker),
     use_container_width=True)
 how_to_read(
     "in alto il **prezzo** con le tre zone: **In-Sample** (blu, dove si calibra), "
@@ -570,12 +588,13 @@ cV2.metric("Trade OOS", f"{ev['n_trades_oos']}",
            delta=f"min {min_trades}", delta_color="normal")
 cV3.metric("Consistenza WF", f"{wf['consistency']*100:.0f}%" if wf["folds"] else "—")
 
-if holdout_frac > 0:
-    st.warning(f"🔒 **Holdout bloccato:** i dati dopo il **{holdout_date.date()}** "
-               f"({holdout_frac*100:.0f}% finale) andrebbero guardati **una sola volta**, "
-               "alla fine dello sviluppo. Ogni volta che modifichi i parametri guardando "
-               "l'OOS, l'OOS diventa in-sample: l'holdout e' l'ultima difesa contro il "
-               "data-snooping.")
+if holdout_start_date is not None:
+    st.warning(f"🔒 **Holdout bloccato:** le ultime **{len(holdout_price)} barre** (dal "
+               f"**{holdout_start_date.date()}**, {holdout_frac*100:.0f}% finale) sono "
+               "**escluse da tutta l'analisi** e vanno guardate **una sola volta**, a fine "
+               "sviluppo. Ogni volta che ritocchi i parametri guardando l'OOS, l'OOS diventa "
+               "in-sample: l'holdout e' l'ultima difesa contro il data-snooping. "
+               "Con **Holdout = 0** rientrano nel set e l'OOS si allarga (piu' trade).")
 
 st.caption("⚠️ Strumento di ricerca a scopo educativo. Nessun risultato passato garantisce "
            "performance future. Non e' consulenza finanziaria. · Kriterion Quant")

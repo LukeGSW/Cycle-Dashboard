@@ -22,9 +22,11 @@ from src.seasonality import (day_of_week_stats, month_of_year_stats,
                              significant_month_buckets)
 from src.signals import (cycle_position, regime_mask_from_hurst, seasonal_mask,
                          apply_confluence)
-from src.backtest import pct_returns
+from src.backtest import (pct_returns, run_backtest, compute_metrics,
+                          buy_and_hold_returns, count_trades, equity_curve)
 from src.validation import (simple_is_oos_split, locked_holdout_split,
-                            evaluate_simple, walk_forward_evaluate)
+                            evaluate_simple, walk_forward_evaluate,
+                            random_entry_null, traffic_light)
 from src import charts
 
 # ===================================================
@@ -87,6 +89,49 @@ def evaluate_cached(price, position, is_frac, cost_bps, min_trades, alpha,
                            alpha, min_sharpe_frac, n_sims, seed)
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def evaluate_holdout_cached(price_full, dev_end_pos, dom_period, bandwidth, mode,
+                            use_regime, use_season, favorable_months, hurst_window,
+                            max_hurst, hurst_step, cost_bps, n_sims, min_trades,
+                            alpha, min_sharpe_frac, seed):
+    """
+    ESAME FINALE: valuta la strategia CONGELATA (periodo e mesi favorevoli fissati sullo
+    sviluppo) SOLO sul segmento holdout, mai visto ne' per calibrazione ne' per scelta
+    parametri. Filtri causali -> nessun look-ahead. E' l'unico test davvero indipendente.
+    """
+    # Segnale con parametri congelati, esteso a tutta la serie (per continuita' al confine)
+    base_full = cycle_position(price_full, dom_period, bandwidth, mode)
+    masks_full = []
+    if use_regime:
+        h_full = rolling_hurst(price_full, hurst_window, "dfa", hurst_step)
+        masks_full.append(regime_mask_from_hurst(h_full, max_hurst))
+    if use_season:
+        masks_full.append(seasonal_mask(price_full, favorable_months))
+    position_full = apply_confluence(base_full, masks_full) if masks_full else base_full
+
+    # Backtest sull'intera serie (lo shift +1 al confine e' corretto) e taglio del solo holdout
+    bt_full = run_backtest(price_full, position_full, cost_bps)
+    ho_ret = bt_full["strat_returns"].iloc[dev_end_pos:]
+    ho_pos = position_full.iloc[dev_end_pos:]
+    price_ho = price_full.iloc[dev_end_pos:]
+
+    ho_metrics = compute_metrics(ho_ret)
+    bh_ho = buy_and_hold_returns(price_full).iloc[dev_end_pos:]
+    bh_ho_metrics = compute_metrics(bh_ho)
+    ho_trades = count_trades(ho_pos)
+
+    null = random_entry_null(price_ho, ho_pos, n_sims=n_sims, cost_bps=cost_bps, seed=seed)
+    verdict, reasons, _ = traffic_light(ho_metrics, bh_ho_metrics, null, ho_trades,
+                                        min_trades=min_trades, alpha=alpha,
+                                        min_sharpe_frac=min_sharpe_frac)
+    return {
+        "ho_metrics": ho_metrics, "bh_ho_metrics": bh_ho_metrics, "ho_trades": ho_trades,
+        "null": null, "verdict": verdict, "reasons": reasons,
+        "ho_equity": equity_curve(ho_ret), "bh_ho_equity": equity_curve(bh_ho),
+        "start": price_ho.index[0], "end": price_ho.index[-1], "n_bars": len(price_ho),
+    }
+
+
 # ===================================================
 # SIDEBAR — PARAMETRI
 # ===================================================
@@ -143,6 +188,13 @@ with st.sidebar:
                                      help="Heatmap tempo-periodo: informativa ma piu' pesante.")
         run_wf = st.checkbox("Esegui walk-forward", value=True,
                              help="Disattivalo per un'analisi piu' leggera.")
+
+        st.divider()
+        st.subheader("🔒 Esame finale")
+        unlock_holdout = st.checkbox("🔓 Sblocca l'esame sull'holdout", value=False,
+                                     help="Valuta la strategia CONGELATA solo sul segmento "
+                                          "holdout mai visto. Da usare UNA VOLTA SOLA, a "
+                                          "sviluppo concluso: dopo, il segmento e' 'speso'.")
 
         st.divider()
         submitted = st.form_submit_button("▶️ Esegui / Aggiorna analisi",
@@ -625,5 +677,60 @@ if holdout_start_date is not None:
                "in-sample: l'holdout e' l'ultima difesa contro il data-snooping. "
                "Con **Holdout = 0** rientrano nel set e l'OOS si allarga (piu' trade).")
 
+# ===================================================
+# SEZIONE 10 — ESAME FINALE SULL'HOLDOUT
+# ===================================================
+if holdout_start_date is not None:
+    st.divider()
+    st.header("10 · 🔒 Esame finale sull'holdout")
+    if not unlock_holdout:
+        st.info("Questo e' l'**esame indipendente definitivo**: la strategia congelata sullo "
+                "sviluppo, valutata sul segmento holdout che non ha mai influenzato nulla "
+                "(ne' calibrazione ne' scelta parametri). E' **bloccato**: sbloccalo dalla "
+                "sidebar (🔒 Esame finale) **solo a sviluppo concluso** e guardalo **una volta "
+                "sola**. Se lo consulti e poi ritocchi i parametri, l'holdout e' bruciato.")
+    else:
+        st.error("🔓 **Holdout sbloccato — segmento ora 'speso'.** Usa questo esito come "
+                 "decisione **finale** (accetta / scarta il segnale), NON per iterare: se "
+                 "ritocchi i parametri guardando questo risultato, stai facendo overfitting "
+                 "sull'ultima difesa.")
+        with st.spinner("🔒 Valutazione della strategia congelata sull'holdout..."):
+            hoev = evaluate_holdout_cached(
+                price_full, dev_end_pos, dom_period, bandwidth, mode, use_regime, use_season,
+                favorable_months, hurst_window, max_hurst, max(1, len(price_full) // 1500),
+                cost_bps, int(n_sims), min_trades, alpha, min_sharpe_frac, 42)
+
+        h_label, h_box, h_tag = verdict_map[hoev["verdict"]]
+        getattr(st, h_box)(f"### Holdout: {h_label} — {h_tag}")
+        for r in hoev["reasons"]:
+            st.write("• " + r)
+        st.caption(f"Segmento holdout: **{hoev['start'].date()} → {hoev['end'].date()}** "
+                   f"({hoev['n_bars']} barre, {hoev['ho_trades']} trade). Strategia congelata: "
+                   f"periodo ~{dom_period:.0f} barre e mesi favorevoli fissati sullo sviluppo.")
+
+        ho_tbl = pd.DataFrame({
+            "Strategia congelata (holdout)": _fmt(hoev["ho_metrics"]),
+            "Buy & Hold (holdout)": _fmt(hoev["bh_ho_metrics"]),
+        }).T
+        st.dataframe(ho_tbl, width='stretch')
+
+        st.plotly_chart(charts.build_holdout_equity(hoev["ho_equity"], hoev["bh_ho_equity"]),
+                        width='stretch')
+
+        ho_null = hoev["null"]
+        if ho_null["ret_dist"].size:
+            st.plotly_chart(
+                charts.build_null_distribution(ho_null["ret_dist"], ho_null["strat_total"],
+                                               ho_null["p_value_return"], "Rendimento holdout"),
+                width='stretch')
+
+        how_to_read(
+            "questo e' l'**unico test su dati che non hanno MAI influenzato la strategia**. "
+            "Verde qui — positivo netto costi, batte il null e regge il confronto risk-adjusted "
+            "col buy&hold — e' la **conferma piu' forte** che l'edge generalizza. Se non regge, "
+            "fuori campione l'edge non ha tenuto: la decisione corretta e' **scartare**, non "
+            "tornare a ottimizzare (bruceresti l'ultima difesa).")
+
+st.divider()
 st.caption("⚠️ Strumento di ricerca a scopo educativo. Nessun risultato passato garantisce "
            "performance future. Non e' consulenza finanziaria. · Kriterion Quant")

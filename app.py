@@ -458,9 +458,17 @@ verdict_map = {
 }
 label, box, tagline = verdict_map[verdict]
 banner = getattr(st, box)
+st.markdown("**Esito del singolo split 2/3–1/3.** Il verdetto *finale* (Sezione 9) tiene conto "
+            "anche del walk-forward, per non fidarsi di un'unica finestra.")
 banner(f"### {label} — {tagline}")
 for r in ev["reasons"]:
     st.write("• " + r)
+
+oos_bars = ev["oos_metrics"]["n_periods"]
+st.caption(f"🎯 Finestra OOS testata: **{ev['split_date'].date()} → {price.index[-1].date()}** "
+           f"({oos_bars} barre, {ev['n_trades_oos']} trade). Cambiando l'Holdout questa finestra "
+           "si **sposta nel tempo**: se un piccolo spostamento del confine ribalta il verdetto, "
+           "l'edge non e' robusto (ecco perche' il verdetto finale pesa anche il walk-forward).")
 
 # Metriche IS vs OOS vs Buy&Hold
 def _fmt(m):
@@ -579,7 +587,28 @@ st.divider()
 # SEZIONE 9 — VERDETTO E HOLDOUT
 # ===================================================
 st.header("9 · Verdetto finale")
-banner(f"### {label} — {tagline}")
+
+# Verdetto finale ROBUSTO: un verde del singolo split viene declassato a giallo se il
+# walk-forward e' instabile (< 50% di fold positivi). Un solo split fortunato non basta.
+final_verdict = verdict
+downgrade_reason = None
+if verdict == "GREEN" and run_wf and wf["folds"] and wf["consistency"] < 0.5:
+    final_verdict = "YELLOW"
+    downgrade_reason = (
+        f"Il singolo split OOS e' verde, ma il **walk-forward e' instabile** "
+        f"(solo {wf['consistency']*100:.0f}% di fold positivi): il verde dipende "
+        "probabilmente da **un'unica finestra fortunata**, non da un ciclo stabile. "
+        "Declassato a GIALLO.")
+
+f_label, f_box, f_tagline = verdict_map[final_verdict]
+getattr(st, f_box)(f"### {f_label} — {f_tagline}")
+if downgrade_reason:
+    st.write("• " + downgrade_reason)
+elif final_verdict == "GREEN" and run_wf and wf["folds"]:
+    st.write(f"• Coerente anche col walk-forward ({wf['consistency']*100:.0f}% di fold positivi).")
+elif verdict == "GREEN" and (not run_wf or not wf["folds"]):
+    st.caption("ℹ️ Walk-forward disattivato: il verde si basa solo sul singolo split. "
+               "Attivalo per un verdetto robusto alla scelta della finestra OOS.")
 
 cV1, cV2, cV3 = st.columns(3)
 cV1.metric("p-value vs null", f"{null['p_value_return']:.2f}",

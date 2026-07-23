@@ -20,7 +20,8 @@ from src.cycles import (spectral_significance, find_peaks, dominant_period,
 from src.hurst import rolling_hurst
 from src.seasonality import (day_of_week_stats, month_of_year_stats,
                              significant_month_buckets)
-from src.signals import cycle_position, regime_mask, seasonal_mask, apply_confluence
+from src.signals import (cycle_position, regime_mask_from_hurst, seasonal_mask,
+                         apply_confluence)
 from src.backtest import pct_returns
 from src.validation import (simple_is_oos_split, locked_holdout_split,
                             evaluate_simple, walk_forward_evaluate)
@@ -61,15 +62,15 @@ def analyze_spectrum(price, split_pos, min_p, max_p, hp_period, n_surr, seed):
     """Spettro + significativita' + periodo dominante, calcolati SOLO sull'in-sample."""
     is_log = np.log(np.clip(price.iloc[:split_pos].values, 1e-12, None))
     detr = high_pass(is_log, hp_period)
-    periods, power, thr = spectral_significance(detr, min_p, max_p, 400, n_surr, 95, seed)
+    periods, power, thr = spectral_significance(detr, min_p, max_p, 300, n_surr, 95, seed)
     peaks = find_peaks(periods, power, thr, top_k=6)
     dom = dominant_period(detr, min_p, max_p)
     return periods, power, thr, peaks, dom
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def compute_hurst_cached(price, window, method):
-    return rolling_hurst(price, window, method)
+def compute_hurst_cached(price, window, method, step):
+    return rolling_hurst(price, window, method, step)
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -92,52 +93,75 @@ def evaluate_cached(price, position, is_frac, cost_bps, min_trades, alpha,
 with st.sidebar:
     st.title("🌀 Parametri")
     st.caption("Analisi ciclica · Kriterion Quant")
-    st.divider()
 
-    st.subheader("Strumento")
-    ticker = st.text_input("Ticker EODHD", value="SPY.US",
-                           help="Es: SPY.US, ENI.MI, GSPC.INDX, EURUSD.FOREX, CL.COMM")
-    c1, c2 = st.columns(2)
-    start_date = c1.date_input("Da", value=pd.Timestamp("2005-01-01"))
-    end_date = c2.date_input("A", value=pd.Timestamp.today())
+    with st.form("params"):
+        st.subheader("Strumento")
+        ticker = st.text_input("Ticker EODHD", value="SPY.US",
+                               help="Es: SPY.US, ENI.MI, GSPC.INDX, EURUSD.FOREX, CL.COMM")
+        c1, c2 = st.columns(2)
+        start_date = c1.date_input("Da", value=pd.Timestamp("2005-01-01"))
+        end_date = c2.date_input("A", value=pd.Timestamp.today())
 
-    st.divider()
-    st.subheader("Ricerca del ciclo")
-    min_p, max_p = st.slider("Range periodi da cercare (barre)", 5, 250, (15, 120),
-                             help="Sotto = rumore; sopra = trend. Il ciclo dominante "
-                                  "viene cercato dentro questo intervallo.")
-    hp_period = st.slider("Cutoff detrend (high-pass)", 60, 400, 200,
-                          help="Cicli piu' lunghi di questo sono trattati come trend e rimossi.")
-    bandwidth = st.slider("Larghezza di banda del filtro", 0.10, 0.60, 0.30, 0.05)
+        st.divider()
+        st.subheader("Ricerca del ciclo")
+        min_p, max_p = st.slider("Range periodi da cercare (barre)", 5, 250, (15, 120),
+                                 help="Sotto = rumore; sopra = trend. Il ciclo dominante "
+                                      "viene cercato dentro questo intervallo.")
+        hp_period = st.slider("Cutoff detrend (high-pass)", 60, 400, 200,
+                              help="Cicli piu' lunghi di questo sono trattati come trend e rimossi.")
+        bandwidth = st.slider("Larghezza di banda del filtro", 0.10, 0.60, 0.30, 0.05)
 
-    st.divider()
-    st.subheader("Segnale e confluenza")
-    mode = st.radio("Modalita' posizione", ["long_flat", "long_short"], horizontal=True,
-                    help="long_flat: lungo nella salita del ciclo, flat nella discesa. "
-                         "long_short: anche corto nella discesa.")
-    use_regime = st.checkbox("Confluenza regime (Hurst basso)", value=True,
-                             help="Opera solo in regime mean-reverting, dove il cycle-timing "
-                                  "e' piu' affidabile.")
-    hurst_window = st.slider("Finestra Hurst", 100, 400, 200, 10)
-    max_hurst = st.slider("Hurst massimo per operare", 0.40, 0.70, 0.55, 0.01)
-    use_season = st.checkbox("Confluenza stagionale (mesi favorevoli in-sample)", value=False)
+        st.divider()
+        st.subheader("Segnale e confluenza")
+        mode = st.radio("Modalita' posizione", ["long_flat", "long_short"], horizontal=True,
+                        help="long_flat: lungo nella salita del ciclo, flat nella discesa. "
+                             "long_short: anche corto nella discesa.")
+        use_regime = st.checkbox("Confluenza regime (Hurst basso)", value=True,
+                                 help="Opera solo in regime mean-reverting, dove il cycle-timing "
+                                      "e' piu' affidabile.")
+        hurst_window = st.slider("Finestra Hurst", 100, 400, 200, 10)
+        max_hurst = st.slider("Hurst massimo per operare", 0.40, 0.70, 0.55, 0.01)
+        use_season = st.checkbox("Confluenza stagionale (mesi favorevoli in-sample)", value=False)
 
-    st.divider()
-    st.subheader("Validazione")
-    cost_bps = st.slider("Costi per trade (bps)", 0.0, 20.0, 3.0, 0.5,
-                         help="Commissioni + slippage per unita' di turnover. Il null e il "
-                              "backtest sono SEMPRE al netto di questi costi.")
-    alpha = st.slider("Soglia p-value vs null", 0.05, 0.50, 0.25, 0.05,
-                      help="Clemente per scelta: 0.25 = la strategia deve stare sopra il "
-                           "75° percentile del null random-entry.")
-    min_trades = st.slider("Trade OOS minimi per il verde", 5, 60, 20)
-    min_sharpe_frac = st.slider("Sharpe OOS minimo (frazione del buy&hold)", 0.0, 1.5, 0.5, 0.1)
-    n_sims = st.select_slider("Simulazioni nulle", [100, 200, 300, 500], value=300)
-    n_folds = st.slider("Fold walk-forward", 2, 8, 4)
-    holdout_frac = st.slider("Holdout finale bloccato (frazione)", 0.0, 0.30, 0.15, 0.05)
+        st.divider()
+        st.subheader("Validazione")
+        cost_bps = st.slider("Costi per trade (bps)", 0.0, 20.0, 3.0, 0.5,
+                             help="Commissioni + slippage per unita' di turnover. Il null e il "
+                                  "backtest sono SEMPRE al netto di questi costi.")
+        alpha = st.slider("Soglia p-value vs null", 0.05, 0.50, 0.25, 0.05,
+                          help="Clemente per scelta: 0.25 = la strategia deve stare sopra il "
+                               "75° percentile del null random-entry.")
+        min_trades = st.slider("Trade OOS minimi per il verde", 5, 60, 20)
+        min_sharpe_frac = st.slider("Sharpe OOS minimo (frazione del buy&hold)", 0.0, 1.5, 0.5, 0.1)
+        n_sims = st.select_slider("Simulazioni nulle", [100, 200, 300, 500], value=200)
+        n_folds = st.slider("Fold walk-forward", 2, 8, 3)
+        holdout_frac = st.slider("Holdout finale bloccato (frazione)", 0.0, 0.30, 0.15, 0.05)
 
-    st.divider()
+        st.divider()
+        st.subheader("Output opzionali (CPU)")
+        show_scalogram = st.checkbox("Mostra scalogramma", value=False,
+                                     help="Heatmap tempo-periodo: informativa ma piu' pesante.")
+        run_wf = st.checkbox("Esegui walk-forward", value=True,
+                             help="Disattivalo per un'analisi piu' leggera.")
+
+        st.divider()
+        submitted = st.form_submit_button("▶️ Esegui / Aggiorna analisi",
+                                          use_container_width=True, type="primary")
+
     st.caption("📡 Dati: EODHD | Analisi causale, niente look-ahead")
+
+# ===================================================
+# GATE — calcola solo su richiesta (evita il throttle CPU di Streamlit Cloud)
+# ===================================================
+if submitted:
+    st.session_state["ran"] = True
+if not st.session_state.get("ran"):
+    st.title("🌀 Dashboard di Analisi Ciclica")
+    st.info("👈 Imposta i parametri nella sidebar e premi **▶️ Esegui / Aggiorna analisi**.\n\n"
+            "Il calcolo (spettro, Hurst, ipotesi nulla, walk-forward) parte **solo quando "
+            "premi il pulsante**: cosi' la dashboard non ricalcola a ogni spostamento di slider "
+            "e non satura la CPU di Streamlit Community Cloud.")
+    st.stop()
 
 
 # ===================================================
@@ -223,7 +247,7 @@ st.markdown("Periodogramma di **Lomb-Scargle** sulla serie detrendizzata, calcol
 
 with st.spinner("🔬 Analisi spettrale e test di significativita'..."):
     periods, power, thr, peaks, dom_period = analyze_spectrum(
-        price, split_pos, min_p, max_p, hp_period, n_surr=int(min(n_sims, 200)), seed=42)
+        price, split_pos, min_p, max_p, hp_period, n_surr=int(min(n_sims, 150)), seed=42)
 
 if not (dom_period == dom_period):
     st.error("Impossibile stimare un periodo dominante nel range scelto. Allarga il range.")
@@ -265,15 +289,19 @@ how_to_read(
     "minimo del ciclo (potenziale acquisto), vicino a **+1** = massimo (potenziale uscita). "
     "È l'onda che il segnale cerca di cavalcare.")
 
-with st.spinner("🌊 Calcolo scalogramma..."):
-    sc_periods, sc_mat = compute_scalogram(price, min_p, max_p, 40, bandwidth)
-st.plotly_chart(charts.build_scalogram(sc_mat, sc_periods, price.index),
-                use_container_width=True)
-how_to_read(
-    "questa heatmap mostra, per ogni **data** (X) e ogni **periodo** (Y), quanta **energia "
-    "ciclica** c'e' (colore chiaro = molta). Se la banda luminosa **si sposta** in verticale "
-    "nel tempo, il ciclo dominante **cambia periodo** (non stazionarieta'): e' il motivo per "
-    "cui ri-stimiamo il periodo nel walk-forward invece di fidarci di un valore fisso.")
+if show_scalogram:
+    with st.spinner("🌊 Calcolo scalogramma..."):
+        sc_periods, sc_mat = compute_scalogram(price, min_p, max_p, 30, bandwidth)
+    st.plotly_chart(charts.build_scalogram(sc_mat, sc_periods, price.index),
+                    use_container_width=True)
+    how_to_read(
+        "questa heatmap mostra, per ogni **data** (X) e ogni **periodo** (Y), quanta **energia "
+        "ciclica** c'e' (colore chiaro = molta). Se la banda luminosa **si sposta** in verticale "
+        "nel tempo, il ciclo dominante **cambia periodo** (non stazionarieta'): e' il motivo per "
+        "cui ri-stimiamo il periodo nel walk-forward invece di fidarci di un valore fisso.")
+else:
+    st.caption("🌊 Scalogramma disattivato — attivalo nella sidebar (Output opzionali) se ti "
+               "serve vedere la deriva del periodo nel tempo.")
 
 st.divider()
 
@@ -317,7 +345,9 @@ st.divider()
 # ===================================================
 st.header("4 · Regime — il cycle-timing conviene adesso?")
 with st.spinner("📐 Esponente di Hurst rolling..."):
-    hurst = compute_hurst_cached(price, hurst_window, "dfa")
+    # step adattivo: su serie lunghe calcola 1 barra ogni N (l'Hurst varia lentamente)
+    hurst_step = max(1, len(price) // 1500)
+    hurst = compute_hurst_cached(price, hurst_window, "dfa", hurst_step)
 h_last = hurst.dropna().iloc[-1] if hurst.notna().any() else np.nan
 
 st.plotly_chart(charts.build_hurst_chart(price, hurst), use_container_width=True)
@@ -371,7 +401,7 @@ base_pos = cycle_position(price, dom_period, bandwidth, mode)
 masks = []
 active_filters = ["Ciclo (sinewave di Ehlers)"]
 if use_regime:
-    rmask = regime_mask(price, hurst_window, "dfa", max_hurst)
+    rmask = regime_mask_from_hurst(hurst, max_hurst)  # riusa l'Hurst gia' calcolato
     masks.append(rmask)
     active_filters.append(f"Regime (Hurst ≤ {max_hurst})")
 if use_season:
@@ -503,9 +533,11 @@ def signal_builder(train_end_pos: int) -> pd.Series:
     return apply_confluence(base, fold_masks) if fold_masks else base
 
 
-with st.spinner("🔁 Walk-forward in corso..."):
-    wf = walk_forward_evaluate(price, signal_builder, n_folds=int(n_folds),
-                               min_train_frac=0.5, cost_bps=cost_bps)
+wf = {"folds": [], "consistency": 0.0}
+if run_wf:
+    with st.spinner("🔁 Walk-forward in corso..."):
+        wf = walk_forward_evaluate(price, signal_builder, n_folds=int(n_folds),
+                                   min_train_frac=0.5, cost_bps=cost_bps)
 
 if wf["folds"]:
     st.plotly_chart(charts.build_walkforward_bars(wf["folds"]), use_container_width=True)
@@ -519,6 +551,9 @@ if wf["folds"]:
         "ogni barra e' il **rendimento OOS di un fold** (una finestra futura mai vista in "
         "calibrazione). Vuoi vedere **più barre verdi** e di dimensioni simili: significa che "
         "il ciclo funziona in epoche diverse. Barre alternate verde/rosso = ciclo instabile.")
+elif not run_wf:
+    st.caption("🔁 Walk-forward disattivato — attivalo nella sidebar per verificare la "
+               "stabilita' del ciclo su piu' finestre OOS.")
 
 st.divider()
 

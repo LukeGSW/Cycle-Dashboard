@@ -1,1 +1,42 @@
-{}
+{
+  "WMT.US": {
+    "config_hash": "6609a7ad9657",
+    "frozen": {
+      "dom_period": 60.90719883622318,
+      "favorable_months": [
+        2,
+        10
+      ]
+    },
+    "history": [],
+    "holdout_result": {
+      "max_dd": -0.10442828816920069,
+      "n_trades": 38,
+      "p_value": 0.025,
+      "sharpe": 1.7036880815928206,
+      "total_return": 0.8985846386853047,
+      "verdict": "GREEN"
+    },
+    "locked_at": "2026-07-23T22:09:54",
+    "params": {
+      "alpha": 0.25,
+      "bandwidth": 0.3,
+      "cost_bps": 3.0,
+      "end_date": "2026-07-23",
+      "holdout_frac": 0.15,
+      "hp_period": 200,
+      "hurst_window": 200,
+      "max_hurst": 0.55,
+      "max_p": 62,
+      "min_p": 15,
+      "min_sharpe_frac": 0.5,
+      "min_trades": 20,
+      "mode": "long_flat",
+      "n_folds": 3,
+      "n_sims": 200,
+      "start_date": "2005-01-01",
+      "use_regime": true,
+      "use_season": false
+    }
+  }
+}

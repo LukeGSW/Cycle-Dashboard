@@ -110,20 +110,29 @@ def build_spectrum_chart(periods: np.ndarray, power: np.ndarray,
             line=dict(color=COLORS["negative"], width=1.2, dash="dash"),
             hovertemplate="Soglia %{y:.3f}<extra></extra>"))
 
+    # NB Plotly: su un asse X logaritmico le coordinate di add_vline sono in unita' log10
+    # (x=79 verrebbe posizionato a 10^79, facendo esplodere la scala). Passiamo log10(periodo).
     for pk in peaks:
         color = COLORS["positive"] if pk["significant"] else COLORS["neutral"]
-        fig.add_vline(x=pk["period"], line_color=color, line_width=1,
+        fig.add_vline(x=np.log10(pk["period"]), line_color=color, line_width=1,
                       line_dash="dot", opacity=0.6)
 
     if dominant == dominant:
-        fig.add_vline(x=dominant, line_color=COLORS["secondary"], line_width=2,
+        fig.add_vline(x=np.log10(dominant), line_color=COLORS["secondary"], line_width=2,
                       annotation_text=f"Dominante ~{dominant:.0f}",
                       annotation_font_color=COLORS["secondary"])
 
     fig.update_layout(**_base_layout(
         "Periodogramma (Lomb-Scargle) — dove sono i cicli",
         x_title="Periodo (barre)", y_title="Potenza normalizzata"))
-    fig.update_xaxes(type="log")
+    # Range esplicito (in unita' log10) per inquadrare esattamente la banda dei periodi
+    # cercati ed evitare qualsiasi auto-range anomalo.
+    if periods.size:
+        lo = float(np.log10(periods.min())) - 0.03
+        hi = float(np.log10(periods.max())) + 0.03
+        fig.update_xaxes(type="log", range=[lo, hi])
+    else:
+        fig.update_xaxes(type="log")
     return fig
 
 

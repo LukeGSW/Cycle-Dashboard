@@ -41,6 +41,7 @@ falsificare). La spina dorsale è **oggettiva e replicabile**:
 cycle-dashboard/
 ├── app.py                  # UI Streamlit + riquadri "Come si legge"
 ├── requirements.txt
+├── presets.json            # registro dei parametri validati per ticker (versionato in git)
 ├── .streamlit/
 │   ├── config.toml
 │   └── secrets.toml.example
@@ -53,8 +54,20 @@ cycle-dashboard/
     ├── signals.py          # segnale ciclico + confluenza
     ├── backtest.py         # backtest causale + metriche
     ├── validation.py       # split, walk-forward, null, semaforo
+    ├── registry.py         # registro parametri validati (save/recall per ticker)
     └── charts.py           # grafici Plotly dark
 ```
+
+### Registro dei parametri validati
+
+Quando **sblocchi l'esame finale sull'holdout**, la config (parametri + periodo/mesi
+congelati + verdetto holdout + timestamp + hash) viene **registrata e associata al ticker**.
+Al successivo caricamento di quel ticker i parametri vengono **richiamati automaticamente** e
+**bloccati**: per modificarli serve un **Reset** esplicito (il vecchio record va in `history`).
+
+La persistenza è **git-based** (Streamlit Cloud ha filesystem effimero): l'app legge
+`presets.json` dal repo all'avvio; al salvataggio ti offre il file aggiornato da **committare
+su GitHub**. La cronologia git è l'audit trail anti-imbroglio.
 
 ---
 

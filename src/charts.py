@@ -266,6 +266,26 @@ def build_equity_chart(equity_strat: pd.Series, equity_bh: pd.Series,
 
 
 # ============================================================
+# 7b. EQUITY SUL SOLO HOLDOUT (esame finale)
+# ============================================================
+def build_holdout_equity(equity_strat: pd.Series, equity_bh: pd.Series) -> go.Figure:
+    """Equity base 100 sul solo segmento holdout: strategia congelata vs buy & hold."""
+    es = equity_strat / equity_strat.iloc[0] * 100
+    eb = equity_bh / equity_bh.iloc[0] * 100
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=es.index, y=es.values, name="Strategia congelata",
+                             line=dict(color=COLORS["accent"], width=2),
+                             fill="tozeroy", fillcolor="rgba(171,71,188,0.08)"))
+    fig.add_trace(go.Scatter(x=eb.index, y=eb.values, name="Buy & Hold",
+                             line=dict(color=COLORS["neutral"], width=1.4, dash="dot")))
+    fig.add_hline(y=100, line_color=COLORS["neutral"], line_width=0.7,
+                  line_dash="dash", opacity=0.5)
+    fig.update_layout(**_base_layout("Esame finale — equity sul solo holdout (base 100)",
+                                     x_title="Data", y_title="NAV (base 100)"))
+    return fig
+
+
+# ============================================================
 # 8. DRAWDOWN
 # ============================================================
 def build_drawdown_chart(equity: pd.Series) -> go.Figure:

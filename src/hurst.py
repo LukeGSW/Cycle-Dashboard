@@ -132,7 +132,8 @@ def hurst_dfa(x, min_scale: int = 8, order: int = 1) -> float:
 # ============================================================
 # ROLLING HURST — regime nel tempo (causale)
 # ============================================================
-def rolling_hurst(price: pd.Series, window: int = 200, method: str = "dfa") -> pd.Series:
+def rolling_hurst(price: pd.Series, window: int = 200, method: str = "dfa",
+                  step: int = 1) -> pd.Series:
     """
     Esponente di Hurst su finestra mobile, calcolato sui rendimenti log. Causale:
     ogni valore usa solo la finestra di dati passata.
@@ -141,6 +142,10 @@ def rolling_hurst(price: pd.Series, window: int = 200, method: str = "dfa") -> p
         price:  Serie di prezzi (index datetime)
         window: ampiezza della finestra mobile (barre). >=150 consigliato.
         method: 'dfa' (default) o 'rs'
+        step:   passo di ricalcolo. step>1 calcola l'esponente ogni `step` barre e
+                riempie in avanti (forward-fill) i valori intermedi: riduce il costo CPU
+                di ~step volte con effetto trascurabile (l'Hurst e' lento a variare).
+                Causale (il forward-fill usa solo il valore piu' recente gia' calcolato).
 
     Returns:
         pd.Series dell'esponente di Hurst, allineata a `price` (NaN nella fase iniziale).
@@ -150,6 +155,10 @@ def rolling_hurst(price: pd.Series, window: int = 200, method: str = "dfa") -> p
 
     values = np.full(len(price), np.nan)
     arr = log_ret.values
-    for i in range(window, len(price)):
+    step = max(int(step), 1)
+    for i in range(window, len(price), step):
         values[i] = estimator(arr[i - window + 1:i + 1])
-    return pd.Series(values, index=price.index, name=f"hurst_{method}")
+    s = pd.Series(values, index=price.index, name=f"hurst_{method}")
+    if step > 1:
+        s = s.ffill()   # riempie le barre intermedie con l'ultimo valore calcolato (causale)
+    return s

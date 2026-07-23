@@ -9,6 +9,8 @@ ipotesi nulla random-entry, walk-forward, semaforo). Ogni sezione include un riq
 Deploy: GitHub -> Streamlit Cloud. La chiave EODHD va in Settings -> Secrets.
 """
 
+from datetime import datetime
+
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -28,6 +30,8 @@ from src.validation import (simple_is_oos_split, locked_holdout_split,
                             evaluate_simple, walk_forward_evaluate,
                             random_entry_null, traffic_light)
 from src import charts
+from src.registry import (load_registry_file, make_record, registry_to_json,
+                         config_hash, PARAM_KEYS)
 
 # ===================================================
 # CONFIGURAZIONE PAGINA
@@ -217,6 +221,63 @@ if not st.session_state.get("ran"):
 
 
 # ===================================================
+# REGISTRO — richiamo automatico dei parametri validati per ticker
+# ===================================================
+registry = st.session_state.setdefault("registry", load_registry_file())
+ticker_key = ticker.strip().upper()
+preset = registry.get(ticker_key)
+edit_mode = st.session_state.get(f"edit::{ticker_key}", False)
+locked = (preset is not None) and (not edit_mode)
+
+if locked:
+    # I parametri BLOCCATI del registro vincono sui widget (ignorati finche' non fai Reset).
+    p = preset.get("params", {})
+    if p.get("start_date"):
+        start_date = pd.to_datetime(p["start_date"]).date()
+    # NB: end_date NON e' congelata -> puoi estenderla in avanti per monitorare la strategia
+    # congelata su barre nuove senza dover fare Reset.
+    min_p = p.get("min_p", min_p)
+    max_p = p.get("max_p", max_p)
+    hp_period = p.get("hp_period", hp_period)
+    bandwidth = p.get("bandwidth", bandwidth)
+    mode = p.get("mode", mode)
+    use_regime = p.get("use_regime", use_regime)
+    hurst_window = p.get("hurst_window", hurst_window)
+    max_hurst = p.get("max_hurst", max_hurst)
+    use_season = p.get("use_season", use_season)
+    cost_bps = p.get("cost_bps", cost_bps)
+    holdout_frac = p.get("holdout_frac", holdout_frac)
+    min_trades = p.get("min_trades", min_trades)
+    alpha = p.get("alpha", alpha)
+    min_sharpe_frac = p.get("min_sharpe_frac", min_sharpe_frac)
+    n_sims = p.get("n_sims", n_sims)
+    n_folds = p.get("n_folds", n_folds)
+
+if preset is not None:
+    v = preset.get("holdout_result", {}).get("verdict", "?")
+    if locked:
+        cR1, cR2 = st.columns([3, 1])
+        cR1.success(f"🔒 **{ticker_key} — config VALIDATA e bloccata** "
+                    f"(il {str(preset.get('locked_at', '?'))[:10]}, holdout: {v}). "
+                    "I parametri sono caricati dal registro: la sidebar e' **ignorata** finche' "
+                    "non premi Reset. Puoi cambiare la **data di fine** (o il ticker) per "
+                    "**monitorare** la config congelata su barre nuove.")
+        if cR2.button("🔓 Reset / ri-valida", width='stretch',
+                      help="Sblocca i parametri per una NUOVA validazione. Il record attuale "
+                           "sara' archiviato in cronologia al prossimo salvataggio."):
+            st.session_state[f"edit::{ticker_key}"] = True
+            st.rerun()
+    else:
+        st.warning(f"✏️ **{ticker_key} in ri-validazione.** Stai usando i parametri della "
+                   "sidebar; la vecchia config validata sara' **archiviata** e sostituita solo "
+                   "quando sbloccherai un nuovo esame holdout. Per annullare, ricarica la pagina.")
+
+st.download_button("💾 Scarica presets.json (registro attuale) — poi committalo su GitHub",
+                   data=registry_to_json(registry), file_name="presets.json",
+                   mime="application/json", width='stretch', key="dl_top")
+
+
+# ===================================================
 # HEADER
 # ===================================================
 st.title("🌀 Dashboard di Analisi Ciclica")
@@ -323,8 +384,19 @@ if not (dom_period == dom_period):
     st.error("Impossibile stimare un periodo dominante nel range scelto. Allarga il range.")
     st.stop()
 
+# Se la config e' bloccata, il periodo dominante e' CONGELATO dal registro (strategia
+# faithful): lo spettro qui sotto e' comunque ricalcolato sui dati attuali, cosi' si vede
+# se il ciclo sta derivando rispetto al periodo validato.
+frozen_period = locked and preset.get("frozen", {}).get("dom_period")
+if frozen_period:
+    dom_period = float(frozen_period)
+
 st.plotly_chart(charts.build_spectrum_chart(periods, power, thr, peaks, dom_period),
                 width='stretch')
+if frozen_period:
+    st.caption(f"🔒 Segnale sul periodo **congelato ~{dom_period:.0f} barre** (dal registro). "
+               "Se il picco dello spettro sopra si e' spostato, il ciclo sta derivando dal "
+               "valore validato: valutane un Reset e ri-validazione.")
 how_to_read(
     "l'asse X e' il **periodo del ciclo in barre** (giorni), l'asse Y la sua **potenza**. "
     "I picchi sopra la **linea rossa tratteggiata** sono cicli statisticamente significativi "
@@ -442,6 +514,9 @@ is_returns = returns_all.iloc[:split_pos]
 dow = day_of_week_stats(is_returns)
 moy = month_of_year_stats(is_returns)
 favorable_months = significant_month_buckets(is_returns, alpha=0.10)
+# Config bloccata: mesi favorevoli CONGELATI dal registro (strategia faithful)
+if locked and "favorable_months" in preset.get("frozen", {}):
+    favorable_months = [int(m) for m in preset["frozen"]["favorable_months"]]
 
 cS1, cS2 = st.columns(2)
 with cS1:
@@ -730,6 +805,50 @@ if holdout_start_date is not None:
             "col buy&hold — e' la **conferma piu' forte** che l'edge generalizza. Se non regge, "
             "fuori campione l'edge non ha tenuto: la decisione corretta e' **scartare**, non "
             "tornare a ottimizzare (bruceresti l'ultima difesa).")
+
+        # --- REGISTRAZIONE della config validata (salvataggio allo sblocco dell'esame) ---
+        if not locked:
+            reg = st.session_state["registry"]
+            current_params = {
+                "start_date": str(start_date), "end_date": str(end_date),
+                "min_p": int(min_p), "max_p": int(max_p), "hp_period": int(hp_period),
+                "bandwidth": float(bandwidth), "mode": mode, "use_regime": bool(use_regime),
+                "hurst_window": int(hurst_window), "max_hurst": float(max_hurst),
+                "use_season": bool(use_season), "cost_bps": float(cost_bps),
+                "holdout_frac": float(holdout_frac), "min_trades": int(min_trades),
+                "alpha": float(alpha), "min_sharpe_frac": float(min_sharpe_frac),
+                "n_sims": int(n_sims), "n_folds": int(n_folds),
+            }
+            frozen = {"dom_period": float(dom_period),
+                      "favorable_months": [int(m) for m in favorable_months]}
+            hm = hoev["ho_metrics"]
+            holdout_result = {
+                "verdict": hoev["verdict"],
+                "total_return": float(hm["total_return"]), "sharpe": float(hm["sharpe"]),
+                "max_dd": float(hm["max_dd"]),
+                "p_value": float(hoev["null"]["p_value_return"]),
+                "n_trades": int(hoev["ho_trades"]),
+            }
+            new_hash = config_hash(current_params)
+            old = reg.get(ticker_key)
+            if old is None or old.get("config_hash") != new_hash:
+                reg[ticker_key] = make_record(
+                    current_params, frozen, holdout_result,
+                    datetime.now().isoformat(timespec="seconds"), old_record=old)
+                st.session_state["registry"] = reg
+                st.session_state[f"edit::{ticker_key}"] = False   # ri-blocca dopo il salvataggio
+                st.success(f"🔒 Config di **{ticker_key}** registrata e bloccata "
+                           f"(holdout: {hoev['verdict']}). Scarica il registro aggiornato qui "
+                           "sotto e **committalo su GitHub** per renderlo permanente.")
+                st.download_button(
+                    "💾 Scarica presets.json aggiornato (committalo su GitHub)",
+                    data=registry_to_json(reg), file_name="presets.json",
+                    mime="application/json", width='stretch', key="dl_after_save")
+            else:
+                st.session_state[f"edit::{ticker_key}"] = False  # identica a registro: ri-blocca
+                st.caption(f"Config di {ticker_key} gia' a registro (hash {new_hash}).")
+        else:
+            st.caption("Config gia' registrata e bloccata. Per rivalidare, usa **Reset** in alto.")
 
 st.divider()
 st.caption("⚠️ Strumento di ricerca a scopo educativo. Nessun risultato passato garantisce "

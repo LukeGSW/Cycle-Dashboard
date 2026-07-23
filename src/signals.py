@@ -86,6 +86,24 @@ def regime_mask(price: pd.Series, window: int = 200, method: str = "dfa",
     return mask
 
 
+def regime_mask_from_hurst(hurst: pd.Series, max_hurst: float = 0.55) -> pd.Series:
+    """
+    Come regime_mask ma parte da una serie di Hurst GIA' calcolata: evita di ricalcolare
+    l'esponente (operazione costosa) quando e' gia' disponibile altrove nella dashboard.
+
+    Args:
+        hurst:     Serie dell'esponente di Hurst rolling (causale)
+        max_hurst: soglia sopra la quale il regime e' 'troppo trending' -> maschera 0
+
+    Returns:
+        pd.Series booleana (1.0 favorevole, 0.0 no). Dove Hurst e' NaN -> 1.0 (non filtra).
+    """
+    mask = (hurst <= max_hurst).astype(float)
+    mask[hurst.isna()] = 1.0
+    mask.name = "regime_mask"
+    return mask
+
+
 def seasonal_mask(price: pd.Series, favorable_months: list[int]) -> pd.Series:
     """
     Maschera stagionale: 1.0 nei mesi con bias rialzista significativo (misurati

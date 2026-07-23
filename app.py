@@ -146,7 +146,7 @@ with st.sidebar:
 
         st.divider()
         submitted = st.form_submit_button("▶️ Esegui / Aggiorna analisi",
-                                          use_container_width=True, type="primary")
+                                          width='stretch', type="primary")
 
     st.caption("📡 Dati: EODHD | Analisi causale, niente look-ahead")
 
@@ -272,7 +272,7 @@ if not (dom_period == dom_period):
     st.stop()
 
 st.plotly_chart(charts.build_spectrum_chart(periods, power, thr, peaks, dom_period),
-                use_container_width=True)
+                width='stretch')
 how_to_read(
     "l'asse X e' il **periodo del ciclo in barre** (giorni), l'asse Y la sua **potenza**. "
     "I picchi sopra la **linea rossa tratteggiata** sono cicli statisticamente significativi "
@@ -287,7 +287,7 @@ if not peaks_df.empty:
                                         "significant": "Significativo"})
     peaks_df["Periodo (barre)"] = peaks_df["Periodo (barre)"].round(0)
     peaks_df["Potenza"] = peaks_df["Potenza"].round(3)
-    st.dataframe(peaks_df, use_container_width=True, hide_index=True)
+    st.dataframe(peaks_df, width='stretch', hide_index=True)
 
 st.divider()
 
@@ -299,7 +299,7 @@ osc = cycle_oscillator(price, dom_period, bandwidth)
 
 st.plotly_chart(
     charts.build_price_cycle_chart(price, osc, split_date, chart_holdout_date, ticker),
-    use_container_width=True)
+    width='stretch')
 how_to_read(
     "in alto il **prezzo** con le tre zone: **In-Sample** (blu, dove si calibra), "
     "**Out-of-Sample** (arancio, dove si testa in cieco), **Holdout** (viola, da guardare "
@@ -311,7 +311,7 @@ if show_scalogram:
     with st.spinner("🌊 Calcolo scalogramma..."):
         sc_periods, sc_mat = compute_scalogram(price, min_p, max_p, 30, bandwidth)
     st.plotly_chart(charts.build_scalogram(sc_mat, sc_periods, price.index),
-                    use_container_width=True)
+                    width='stretch')
     how_to_read(
         "questa heatmap mostra, per ogni **data** (X) e ogni **periodo** (Y), quanta **energia "
         "ciclica** c'e' (colore chiaro = molta). Se la banda luminosa **si sposta** in verticale "
@@ -339,7 +339,7 @@ state_label = f"{base_state} · {'in salita' if rising else 'in discesa'}"
 
 colA, colB = st.columns([1, 1.3])
 with colA:
-    st.plotly_chart(charts.build_phase_gauge(osc_last, state_label), use_container_width=True)
+    st.plotly_chart(charts.build_phase_gauge(osc_last, state_label), width='stretch')
 with colB:
     st.markdown(f"""
     **Lettura operativa attuale ({price.index[-1].date()}):**
@@ -368,7 +368,7 @@ with st.spinner("📐 Esponente di Hurst rolling..."):
     hurst = compute_hurst_cached(price, hurst_window, "dfa", hurst_step)
 h_last = hurst.dropna().iloc[-1] if hurst.notna().any() else np.nan
 
-st.plotly_chart(charts.build_hurst_chart(price, hurst), use_container_width=True)
+st.plotly_chart(charts.build_hurst_chart(price, hurst), width='stretch')
 if h_last == h_last:
     regime_txt = ("**mean-reverting** (favorevole ai cicli)" if h_last < 0.5
                   else "**trending** (cicli meno affidabili)")
@@ -394,10 +394,10 @@ favorable_months = significant_month_buckets(is_returns, alpha=0.10)
 cS1, cS2 = st.columns(2)
 with cS1:
     st.plotly_chart(charts.build_seasonality_bars(dow, "Rendimento medio per giorno"),
-                    use_container_width=True)
+                    width='stretch')
 with cS2:
     st.plotly_chart(charts.build_seasonality_bars(moy, "Rendimento medio per mese"),
-                    use_container_width=True)
+                    width='stretch')
 how_to_read(
     "ogni barra e' il **rendimento medio** del bucket (giorno o mese) **in-sample**. Le barre "
     "con la **stella ★** (verdi/rosse) sono **statisticamente significative** (t-test, p<0.05); "
@@ -479,7 +479,7 @@ metrics_table = pd.DataFrame({
     "Out-of-Sample (strategia)": _fmt(ev["oos_metrics"]),
     "Out-of-Sample (Buy & Hold)": _fmt(ev["bh_oos_metrics"]),
 }).T
-st.dataframe(metrics_table, use_container_width=True)
+st.dataframe(metrics_table, width='stretch')
 how_to_read(
     "confronta le tre righe. La strategia deve **reggere fuori campione**: se l'IS e' ottimo "
     "ma l'OOS crolla, e' overfitting. La riga **Buy & Hold OOS** e' il metro del *beta*: uno "
@@ -490,13 +490,13 @@ cE1, cE2 = st.columns([1.4, 1])
 with cE1:
     st.plotly_chart(charts.build_equity_chart(ev["equity"],
                                               (1 + ev["bh_returns"]).cumprod(), split_date),
-                    use_container_width=True)
+                    width='stretch')
     how_to_read(
         "equity a **base 100**. La linea verticale segna l'inizio dell'**OOS**: e' *lì* che "
         "conta la performance. A sinistra la strategia e' calibrata (facile sembrare brava); "
         "a destra e' il vero esame.")
 with cE2:
-    st.plotly_chart(charts.build_drawdown_chart(ev["equity"]), use_container_width=True)
+    st.plotly_chart(charts.build_drawdown_chart(ev["equity"]), width='stretch')
     how_to_read("il **drawdown** e' il calo dal massimo precedente. Misura quanto dolore "
                 "avresti sopportato: un rendimento buono con drawdown enorme e' spesso "
                 "intollerabile nella realta'.")
@@ -508,7 +508,7 @@ if null["ret_dist"].size:
     st.plotly_chart(
         charts.build_null_distribution(null["ret_dist"], null["strat_total"],
                                        null["p_value_return"], "Rendimento OOS"),
-        use_container_width=True)
+        width='stretch')
     how_to_read(
         "l'istogramma grigio e' cio' che avrebbero reso **migliaia di strategie con ingressi "
         "casuali** ma con lo *stesso numero di trade e la stessa durata* della tua, sullo "
@@ -558,7 +558,7 @@ if run_wf:
                                    min_train_frac=0.5, cost_bps=cost_bps)
 
 if wf["folds"]:
-    st.plotly_chart(charts.build_walkforward_bars(wf["folds"]), use_container_width=True)
+    st.plotly_chart(charts.build_walkforward_bars(wf["folds"]), width='stretch')
     consistency = wf["consistency"]
     cwf1, cwf2 = st.columns([1, 2])
     cwf1.metric("Fold OOS positivi", f"{consistency*100:.0f}%")

@@ -91,6 +91,61 @@ def build_price_cycle_chart(price: pd.Series, osc: pd.Series, split_date,
 
 
 # ============================================================
+# 1b. CICLO OPERATIVO — finestra recente FINO A OGGI
+# ============================================================
+def build_operational_chart(price: pd.Series, osc: pd.Series, position: pd.Series,
+                            ticker: str) -> go.Figure:
+    """
+    Prezzo + oscillatore ciclico sulla finestra recente, fino all'ultima barra reale.
+    Le fasce verdi sul prezzo = periodi in cui la strategia e' LONG. Il pallino sull'ultima
+    barra dell'oscillatore mostra il valore corrente (quello del gauge).
+    """
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.6, 0.4],
+                        vertical_spacing=0.07,
+                        subplot_titles=("Prezzo (finestra recente)",
+                                        "Oscillatore ciclico — fino all'ultima barra reale"))
+    fig.add_trace(go.Scatter(x=price.index, y=price.values, name="Prezzo",
+                             line=dict(color=COLORS["primary"], width=1.4)), row=1, col=1)
+
+    # Fasce LONG (posizione > 0) sul pannello prezzo
+    pos_bool = (position.fillna(0).values > 0).astype(int)
+    idx = list(position.index)
+    i, n = 0, len(pos_bool)
+    while i < n:
+        if pos_bool[i] == 1:
+            j = i
+            while j < n and pos_bool[j] == 1:
+                j += 1
+            fig.add_vrect(x0=idx[i], x1=idx[j - 1], fillcolor=COLORS["positive"],
+                          opacity=0.12, line_width=0, row=1, col=1)
+            i = j
+        else:
+            i += 1
+
+    fig.add_trace(go.Scatter(x=osc.index, y=osc.values, name="Ciclo",
+                             line=dict(color=COLORS["accent"], width=1.3)), row=2, col=1)
+    fig.add_hline(y=0, line_color=COLORS["neutral"], line_width=0.7,
+                  line_dash="dash", row=2, col=1)
+    fig.add_trace(go.Scatter(
+        x=[osc.index[-1]], y=[float(osc.values[-1])], mode="markers+text",
+        marker=dict(color=COLORS["secondary"], size=10),
+        text=[f"{float(osc.values[-1]):+.2f}"], textposition="top center",
+        textfont=dict(color=COLORS["secondary"]), name="Ultima barra"), row=2, col=1)
+
+    fig.update_layout(
+        paper_bgcolor=COLORS["background"], plot_bgcolor=COLORS["surface"],
+        font=dict(color=COLORS["text"]),
+        title=dict(text=f"{ticker} — ciclo fino all'ultima barra reale",
+                   font=dict(size=16, color=COLORS["text"])),
+        hovermode="x unified", legend=dict(bgcolor="rgba(0,0,0,0)"),
+        margin=dict(l=60, r=20, t=70, b=40))
+    fig.update_xaxes(showgrid=True, gridcolor="#333355", color=COLORS["text"])
+    fig.update_yaxes(showgrid=True, gridcolor="#333355", color=COLORS["text"])
+    fig.update_yaxes(range=[-1.15, 1.15], row=2, col=1)
+    return fig
+
+
+# ============================================================
 # 2. PERIODOGRAMMA CON SOGLIA DI SIGNIFICATIVITA'
 # ============================================================
 def build_spectrum_chart(periods: np.ndarray, power: np.ndarray,

@@ -161,12 +161,22 @@ def operational_signal_cached(price_full, dom_period, bandwidth, mode, use_regim
         smask = seasonal_mask(price_full, favorable_months)
         base = base * smask
         seasonal_on = bool(smask.iloc[-1] > 0)
+    n_recent = min(len(price_full), 504)   # ~2 anni di barre per il grafico di verifica
+    tail = pd.DataFrame({
+        "Prezzo": price_full.iloc[-10:].round(2),
+        "Oscillatore": osc.iloc[-10:].round(3),
+        "Posizione": base.iloc[-10:].round(0),
+    })
     return {
         "position": float(base.iloc[-1]),
         "osc_last": float(osc.iloc[-1]),
         "osc_prev": float(osc.iloc[-2]) if len(osc) > 1 else float(osc.iloc[-1]),
         "regime_on": regime_on, "h_last": h_last, "seasonal_on": seasonal_on,
         "date": price_full.index[-1],
+        "recent_price": price_full.iloc[-n_recent:],
+        "recent_osc": osc.iloc[-n_recent:],
+        "recent_pos": base.iloc[-n_recent:],
+        "tail": tail,
     }
 
 
@@ -651,12 +661,22 @@ with colg2:
                    "e' solo indicativo: completa la validazione (esame holdout) e blocca la "
                    "config prima di operare.")
 
+# Grafico di VERIFICA: ciclo sulla finestra recente, fino all'ultima barra reale.
+st.plotly_chart(charts.build_operational_chart(
+    opsig["recent_price"], opsig["recent_osc"], opsig["recent_pos"], ticker), width='stretch')
+with st.expander("🔎 Ultime 10 barre reali (verifica prezzo / oscillatore / posizione)"):
+    st.dataframe(opsig["tail"], width='stretch')
+    st.caption(f"L'oscillatore nell'ultima riga ({opsig['osc_last']:+.3f} il "
+               f"{opsig['date'].date()}) e' esattamente il valore del gauge sopra. Se le date "
+               "arrivano fino a oggi, il segnale NON e' fermo al passato.")
+
 how_to_read(
     "questa e' l'**unica sezione che guarda l'ultima barra reale** (le sezioni di validazione "
-    "qui sotto si fermano al set di sviluppo, escludendo l'holdout). La **posizione** e' quella "
-    "decisa alla chiusura piu' recente, da assumere dalla **prossima seduta** (esecuzione t+1). "
-    "Con Holdout > 0 e config bloccata, la strategia congelata viene comunque calcolata fino a "
-    "oggi: e' qui che leggi cosa fare adesso.")
+    "qui sotto si fermano al set di sviluppo, escludendo l'holdout). Nel grafico: **fasce verdi** "
+    "= periodi in cui la strategia e' LONG; il **pallino** sull'oscillatore e' il valore corrente. "
+    "L'oscillatore e' il **ciclo detrendizzato** (non il prezzo): un titolo puo' scendere e avere "
+    "l'oscillatore alto se e' su un **massimo ciclico locale**. La **posizione** e' decisa alla "
+    "chiusura piu' recente, da assumere dalla **prossima seduta** (t+1).")
 
 st.divider()
 

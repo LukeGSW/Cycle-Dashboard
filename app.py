@@ -617,66 +617,71 @@ st.divider()
 # SEGNALE OPERATIVO ATTUALE (ultima barra reale, tutti i dati fino a oggi)
 # ===================================================
 st.header("🎯 Segnale operativo attuale")
-with st.spinner("🎯 Calcolo del segnale all'ultima barra reale..."):
-    opsig = operational_signal_cached(
-        price_full, dom_period, bandwidth, mode, use_regime, use_season,
-        favorable_months, hurst_window, max_hurst, max(1, len(price_full) // 1500))
+if not locked:
+    # DISCIPLINA: nessun segnale operativo prima della validazione. Compare solo quando la
+    # config e' validata (esame holdout) e bloccata nel registro per questo ticker.
+    st.info("🔒 **Disponibile solo dopo la validazione.** Il segnale operativo sui dati fino a "
+            "oggi compare **quando la config e' validata e bloccata** (esame holdout superato e "
+            "salvato nel registro) per questo ticker. Prima sarebbe un segnale **non validato**, "
+            "da non operare: completa prima la validazione qui sotto, poi sblocca l'esame "
+            "holdout per registrare la config.")
+else:
+    with st.spinner("🎯 Calcolo del segnale all'ultima barra reale..."):
+        opsig = operational_signal_cached(
+            price_full, dom_period, bandwidth, mode, use_regime, use_season,
+            favorable_months, hurst_window, max_hurst, max(1, len(price_full) // 1500))
 
-pos_val = opsig["position"]
-pos_label = {1.0: "🟢 LONG", 0.0: "⚪ FLAT", -1.0: "🔴 SHORT"}.get(pos_val, f"{pos_val:+.0f}")
-osc_v = opsig["osc_last"]
-rising = osc_v > opsig["osc_prev"]
-near = "vicino al MINIMO" if osc_v < -0.4 else "vicino al MASSIMO" if osc_v > 0.4 else "zona intermedia"
+    pos_val = opsig["position"]
+    pos_label = {1.0: "🟢 LONG", 0.0: "⚪ FLAT", -1.0: "🔴 SHORT"}.get(pos_val, f"{pos_val:+.0f}")
+    osc_v = opsig["osc_last"]
+    rising = osc_v > opsig["osc_prev"]
+    near = "vicino al MINIMO" if osc_v < -0.4 else "vicino al MASSIMO" if osc_v > 0.4 else "zona intermedia"
 
-cO1, cO2, cO3 = st.columns(3)
-cO1.metric("Posizione (dalla prossima seduta)", pos_label)
-cO2.metric("Fase del ciclo", f"{osc_v:+.2f}", delta=("in salita" if rising else "in discesa"),
-           delta_color="off")
-cO3.metric("Ultima barra reale", f"{opsig['date'].date()}")
+    cO1, cO2, cO3 = st.columns(3)
+    cO1.metric("Posizione (dalla prossima seduta)", pos_label)
+    cO2.metric("Fase del ciclo", f"{osc_v:+.2f}", delta=("in salita" if rising else "in discesa"),
+               delta_color="off")
+    cO3.metric("Ultima barra reale", f"{opsig['date'].date()}")
 
-filt_lines = []
-if use_regime:
-    filt_lines.append(
-        f"**Regime** (Hurst {opsig['h_last']:.2f} vs soglia {max_hurst}): "
-        + ("✅ operativo" if opsig["regime_on"] else "⛔ spento — mercato troppo in trend, "
-           "la posizione ciclica e' forzata a FLAT"))
-if use_season:
-    filt_lines.append("**Stagionalità**: "
-                      + ("✅ mese favorevole" if opsig["seasonal_on"] else "⛔ mese non favorevole"))
-if filt_lines:
-    st.markdown("**Stato dei filtri all'ultima barra:**\n\n"
-                + "\n".join("- " + ln for ln in filt_lines))
+    filt_lines = []
+    if use_regime:
+        filt_lines.append(
+            f"**Regime** (Hurst {opsig['h_last']:.2f} vs soglia {max_hurst}): "
+            + ("✅ operativo" if opsig["regime_on"] else "⛔ spento — mercato troppo in trend, "
+               "la posizione ciclica e' forzata a FLAT"))
+    if use_season:
+        filt_lines.append("**Stagionalità**: "
+                          + ("✅ mese favorevole" if opsig["seasonal_on"] else "⛔ mese non favorevole"))
+    if filt_lines:
+        st.markdown("**Stato dei filtri all'ultima barra:**\n\n"
+                    + "\n".join("- " + ln for ln in filt_lines))
 
-colg1, colg2 = st.columns([1, 1.2])
-with colg1:
-    st.plotly_chart(charts.build_phase_gauge(
-        osc_v, f"{near} · {'in salita' if rising else 'in discesa'}"), width='stretch')
-with colg2:
-    if locked:
+    colg1, colg2 = st.columns([1, 1.2])
+    with colg1:
+        st.plotly_chart(charts.build_phase_gauge(
+            osc_v, f"{near} · {'in salita' if rising else 'in discesa'}"), width='stretch')
+    with colg2:
         st.success(f"🔒 Strategia **CONGELATA dal registro**, valutata su tutti i dati fino al "
                    f"**{opsig['date'].date()}**. Questo e' il segnale da seguire operativamente: "
                    f"**{pos_label}** dalla prossima seduta.")
-    else:
-        st.warning("⚠️ Parametri di **sviluppo** (non ancora validati/bloccati). Questo segnale "
-                   "e' solo indicativo: completa la validazione (esame holdout) e blocca la "
-                   "config prima di operare.")
 
-# Grafico di VERIFICA: ciclo sulla finestra recente, fino all'ultima barra reale.
-st.plotly_chart(charts.build_operational_chart(
-    opsig["recent_price"], opsig["recent_osc"], opsig["recent_pos"], ticker), width='stretch')
-with st.expander("🔎 Ultime 10 barre reali (verifica prezzo / oscillatore / posizione)"):
-    st.dataframe(opsig["tail"], width='stretch')
-    st.caption(f"L'oscillatore nell'ultima riga ({opsig['osc_last']:+.3f} il "
-               f"{opsig['date'].date()}) e' esattamente il valore del gauge sopra. Se le date "
-               "arrivano fino a oggi, il segnale NON e' fermo al passato.")
+    # Grafico di VERIFICA: ciclo sulla finestra recente, fino all'ultima barra reale.
+    st.plotly_chart(charts.build_operational_chart(
+        opsig["recent_price"], opsig["recent_osc"], opsig["recent_pos"], ticker), width='stretch')
+    with st.expander("🔎 Ultime 10 barre reali (verifica prezzo / oscillatore / posizione)"):
+        st.dataframe(opsig["tail"], width='stretch')
+        st.caption(f"L'oscillatore nell'ultima riga ({opsig['osc_last']:+.3f} il "
+                   f"{opsig['date'].date()}) e' esattamente il valore del gauge sopra. Se le date "
+                   "arrivano fino a oggi, il segnale NON e' fermo al passato.")
 
-how_to_read(
-    "questa e' l'**unica sezione che guarda l'ultima barra reale** (le sezioni di validazione "
-    "qui sotto si fermano al set di sviluppo, escludendo l'holdout). Nel grafico: **fasce verdi** "
-    "= periodi in cui la strategia e' LONG; il **pallino** sull'oscillatore e' il valore corrente. "
-    "L'oscillatore e' il **ciclo detrendizzato** (non il prezzo): un titolo puo' scendere e avere "
-    "l'oscillatore alto se e' su un **massimo ciclico locale**. La **posizione** e' decisa alla "
-    "chiusura piu' recente, da assumere dalla **prossima seduta** (t+1).")
+    how_to_read(
+        "questa e' l'**unica sezione che guarda l'ultima barra reale** (le sezioni di validazione "
+        "qui sotto si fermano al set di sviluppo, escludendo l'holdout). Nel grafico: **fasce "
+        "verdi** = periodi in cui la strategia e' LONG; il **pallino** sull'oscillatore e' il "
+        "valore corrente. L'oscillatore e' il **ciclo detrendizzato** (non il prezzo): un titolo "
+        "puo' scendere e avere l'oscillatore alto se e' su un **massimo ciclico locale**. La "
+        "**posizione** e' decisa alla chiusura piu' recente, da assumere dalla **prossima "
+        "seduta** (t+1).")
 
 st.divider()
 

@@ -39,6 +39,45 @@
       "use_season": false
     }
   },
+  "SPY.US": {
+    "config_hash": "965383b965cc",
+    "frozen": {
+      "dom_period": 47.35568075071696,
+      "favorable_months": [
+        3
+      ]
+    },
+    "history": [],
+    "holdout_result": {
+      "max_dd": -0.13105421682186047,
+      "n_trades": 35,
+      "p_value": 0.175,
+      "sharpe": 0.8655652593981872,
+      "total_return": 0.3551354039159771,
+      "verdict": "GREEN"
+    },
+    "locked_at": "2026-07-24T14:31:50",
+    "params": {
+      "alpha": 0.25,
+      "bandwidth": 0.35,
+      "cost_bps": 3.0,
+      "end_date": "2026-07-24",
+      "holdout_frac": 0.15,
+      "hp_period": 200,
+      "hurst_window": 200,
+      "max_hurst": 0.65,
+      "max_p": 60,
+      "min_p": 5,
+      "min_sharpe_frac": 0.5,
+      "min_trades": 20,
+      "mode": "long_flat",
+      "n_folds": 3,
+      "n_sims": 200,
+      "start_date": "2005-01-01",
+      "use_regime": true,
+      "use_season": false
+    }
+  },
   "WMT.US": {
     "config_hash": "6609a7ad9657",
     "frozen": {

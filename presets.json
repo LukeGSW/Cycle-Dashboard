@@ -1,4 +1,44 @@
 {
+  "PG.US": {
+    "config_hash": "8beb7eb387fa",
+    "frozen": {
+      "dom_period": 102.2112351227233,
+      "favorable_months": [
+        6,
+        8
+      ]
+    },
+    "history": [],
+    "holdout_result": {
+      "max_dd": -0.17342325346095477,
+      "n_trades": 37,
+      "p_value": 0.03,
+      "sharpe": 0.7705356323943836,
+      "total_return": 0.3267702972239601,
+      "verdict": "GREEN"
+    },
+    "locked_at": "2026-07-24T12:52:11",
+    "params": {
+      "alpha": 0.25,
+      "bandwidth": 0.3,
+      "cost_bps": 3.0,
+      "end_date": "2026-07-24",
+      "holdout_frac": 0.15,
+      "hp_period": 200,
+      "hurst_window": 200,
+      "max_hurst": 0.65,
+      "max_p": 150,
+      "min_p": 5,
+      "min_sharpe_frac": 0.5,
+      "min_trades": 20,
+      "mode": "long_flat",
+      "n_folds": 3,
+      "n_sims": 200,
+      "start_date": "2005-01-01",
+      "use_regime": true,
+      "use_season": false
+    }
+  },
   "WMT.US": {
     "config_hash": "6609a7ad9657",
     "frozen": {
